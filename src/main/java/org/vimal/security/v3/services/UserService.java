@@ -14,7 +14,6 @@ import org.vimal.security.v3.exceptions.SimpleBadRequestException;
 import org.vimal.security.v3.models.UserModel;
 import org.vimal.security.v3.repos.UserRepo;
 import org.vimal.security.v3.utils.AccessTokenUtility;
-import org.vimal.security.v3.utils.MapperUtility;
 import org.vimal.security.v3.utils.UnleashUtility;
 
 import java.util.*;
@@ -24,6 +23,7 @@ import static org.vimal.security.v3.enums.MailType.*;
 import static org.vimal.security.v3.enums.MfaType.AUTHENTICATOR_APP_MFA;
 import static org.vimal.security.v3.enums.MfaType.EMAIL_MFA;
 import static org.vimal.security.v3.utils.EmailUtility.normalizeEmail;
+import static org.vimal.security.v3.utils.MapperUtility.toUserSummaryDto;
 import static org.vimal.security.v3.utils.MfaUtility.MFA_METHODS;
 import static org.vimal.security.v3.utils.MfaUtility.validateTypeExistence;
 import static org.vimal.security.v3.utils.OtpUtility.generateOtp;
@@ -48,7 +48,6 @@ public class UserService {
     private final RedisService redisService;
     private final Unleash unleash;
     private final AccessTokenUtility accessTokenUtility;
-    private final MapperUtility mapperUtility;
     private final UnleashUtility unleashUtility;
     private final GenericAesStaticEncryptorDecryptor genericAesStaticEncryptorDecryptor;
     private final GenericAesRandomEncryptorDecryptor genericAesRandomEncryptorDecryptor;
@@ -60,23 +59,19 @@ public class UserService {
                 return ResponseEntity.badRequest()
                         .body(Map.of("invalid_inputs", invalidInputs));
             }
-            String encryptedUsername = genericAesStaticEncryptorDecryptor.encrypt(dto.getUsername());
-            if (userRepo.existsByUsername(encryptedUsername)) {
+            if (userRepo.existsByUsername(dto.getUsername())) {
                 throw new SimpleBadRequestException("Username: '" + dto.getUsername() + "' is already taken");
             }
-            String encryptedEmail = genericAesStaticEncryptorDecryptor.encrypt(dto.getEmail());
-            if (userRepo.existsByEmail(encryptedEmail)) {
+            if (userRepo.existsByEmail(dto.getEmail())) {
                 throw new SimpleBadRequestException("Email: '" + dto.getEmail() + "' is already taken");
             }
-            String encryptedNormalizedEmail = genericAesStaticEncryptorDecryptor.encrypt(normalizeEmail(dto.getEmail()));
-            if (userRepo.existsByRealEmail(encryptedNormalizedEmail)) {
+            String normalizedEmail = normalizeEmail(dto.getEmail());
+            if (userRepo.existsByRealEmail(normalizedEmail)) {
                 throw new SimpleBadRequestException("Alias version of email: '" + dto.getEmail() + "' is already taken");
             }
             UserModel user = toUserModel(
                     dto,
-                    encryptedUsername,
-                    encryptedEmail,
-                    encryptedNormalizedEmail
+                    normalizedEmail
             );
             boolean shouldVerifyRegisteredEmail = unleash.isEnabled(REGISTRATION_EMAIL_VERIFICATION.name());
             user.setEmailVerified(!shouldVerifyRegisteredEmail);
@@ -93,25 +88,23 @@ public class UserService {
             } else {
                 response.put("message", "Registration successful");
             }
-            response.put("user", mapperUtility.toUserSummaryDto(user));
+            response.put("user", toUserSummaryDto(user));
             return ResponseEntity.ok(response);
         }
         throw new ServiceUnavailableException("Registration is currently disabled. Please try again later");
     }
 
     private UserModel toUserModel(RegistrationDto dto,
-                                  String encryptedUsername,
-                                  String encryptedEmail,
-                                  String encryptedNormalizedEmail) throws Exception {
+                                  String normalizedEmail) {
         return UserModel.builder()
-                .username(encryptedUsername)
-                .email(encryptedEmail)
-                .realEmail(encryptedNormalizedEmail)
+                .username(dto.getUsername())
+                .email(dto.getEmail())
+                .realEmail(normalizedEmail)
                 .password(passwordEncoder.encode(dto.getPassword()))
                 .firstName(dto.getFirstName())
                 .middleName(dto.getMiddleName())
                 .lastName(dto.getLastName())
-                .createdBy(genericAesRandomEncryptorDecryptor.encrypt("SELF"))
+                .createdBy("SELF")
                 .build();
     }
 
@@ -155,8 +148,8 @@ public class UserService {
         return genericAesStaticEncryptorDecryptor.encrypt(EMAIL_VERIFICATION_TOKEN_PREFIX + userId);
     }
 
-    public UserSummaryDto getSelfDetails() throws Exception {
-        return mapperUtility.toUserSummaryDto(userRepo.findById(getCurrentAuthenticatedUser().getId())
+    public UserSummaryDto getSelfDetails() {
+        return toUserSummaryDto(userRepo.findById(getCurrentAuthenticatedUser().getId())
                 .orElseThrow(() -> new SimpleBadRequestException("Invalid user")));
     }
 
@@ -176,14 +169,14 @@ public class UserService {
             throw new SimpleBadRequestException("Email is already verified");
         }
         user.setEmailVerified(true);
-        user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+        user.recordUpdation("SELF");
         try {
             redisService.deleteAll(Set.of(getEncryptedEmailVerificationTokenKey(user), encryptedEmailVerificationTokenMappingKey));
         } catch (Exception ignored) {
         }
         return Map.of(
                 "message", "Email verification successful",
-                "user", mapperUtility.toUserSummaryDto(userRepo.save(user))
+                "user", toUserSummaryDto(userRepo.save(user))
         );
     }
 
@@ -211,7 +204,7 @@ public class UserService {
             throw new SimpleBadRequestException("Email is already verified");
         }
         mailService.sendEmailAsync(
-                genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                user.getEmail(),
                 "Resending email verification link after registration",
                 "https://godLevelSecurity.com/verifyEmailAfterRegistration?token=" + generateEmailVerificationToken(user),
                 LINK
@@ -219,7 +212,7 @@ public class UserService {
         return Map.of("message", "Email verification link resent successfully. Please check your email");
     }
 
-    private UserModel getUserByUsernameOrEmail(String usernameOrEmail) throws Exception {
+    private UserModel getUserByUsernameOrEmail(String usernameOrEmail) {
         try {
             validateStringIsNonNullAndNotBlank(
                     usernameOrEmail,
@@ -231,13 +224,13 @@ public class UserService {
         UserModel user;
         if (USERNAME_PATTERN.matcher(usernameOrEmail)
                 .matches()) {
-            user = userRepo.findByUsername(genericAesStaticEncryptorDecryptor.encrypt(usernameOrEmail));
+            user = userRepo.findByUsername(usernameOrEmail);
             if (user == null) {
                 throw new SimpleBadRequestException("Invalid username");
             }
         } else if (EMAIL_PATTERN.matcher(usernameOrEmail)
                 .matches()) {
-            user = userRepo.findByEmail(genericAesStaticEncryptorDecryptor.encrypt(usernameOrEmail));
+            user = userRepo.findByEmail(usernameOrEmail);
             if (user == null) {
                 throw new SimpleBadRequestException("Invalid email");
             }
@@ -247,7 +240,7 @@ public class UserService {
         return user;
     }
 
-    public ResponseEntity<Map<String, Object>> forgotPassword(String usernameOrEmail) throws Exception {
+    public ResponseEntity<Map<String, Object>> forgotPassword(String usernameOrEmail) {
         UserModel user = getUserByUsernameOrEmail(usernameOrEmail);
         if (!user.isEmailVerified()) {
             return ResponseEntity.badRequest()
@@ -275,7 +268,7 @@ public class UserService {
         switch (methodType) {
             case EMAIL_MFA -> {
                 mailService.sendEmailAsync(
-                        genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                        user.getEmail(),
                         "Otp for resetting password",
                         generateOtpForForgotPassword(user),
                         OTP
@@ -368,16 +361,16 @@ public class UserService {
     }
 
     private void selfChangePassword(UserModel user,
-                                    String password) throws Exception {
+                                    String password) {
         user.recordPasswordChange(passwordEncoder.encode(password));
-        user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+        user.recordUpdation("SELF");
         userRepo.save(user);
     }
 
-    private void emailConfirmationOnPasswordReset(UserModel user) throws Exception {
+    private void emailConfirmationOnPasswordReset(UserModel user) {
         if (unleash.isEnabled(EMAIL_CONFIRMATION_ON_PASSWORD_RESET.name())) {
             mailService.sendEmailAsync(
-                    genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                    user.getEmail(),
                     "Password reset confirmation",
                     "",
                     PASSWORD_RESET_CONFIRMATION
@@ -401,7 +394,7 @@ public class UserService {
         return Map.of("message", "Password reset successful");
     }
 
-    public ResponseEntity<Map<String, Object>> changePassword(ChangePwdDto dto) throws Exception {
+    public ResponseEntity<Map<String, Object>> changePassword(ChangePwdDto dto) {
         Set<String> invalidInputs = validateInputsPasswordAndConfirmPassword(dto);
         try {
             validatePassword(dto.getOldPassword());
@@ -443,10 +436,10 @@ public class UserService {
         return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
     }
 
-    private void emailConfirmationOnSelfPasswordChange(UserModel user) throws Exception {
+    private void emailConfirmationOnSelfPasswordChange(UserModel user) {
         if (unleash.isEnabled(EMAIL_CONFIRMATION_ON_SELF_PASSWORD_CHANGE.name())) {
             mailService.sendEmailAsync(
-                    genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                    user.getEmail(),
                     "Password change confirmation",
                     "",
                     SELF_PASSWORD_CHANGE_CONFIRMATION
@@ -490,7 +483,7 @@ public class UserService {
 
     private Map<String, String> sendEmailOtpToChangePassword(UserModel user) throws Exception {
         mailService.sendEmailAsync(
-                genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                user.getEmail(),
                 "Otp for password change",
                 generateOtpForPasswordChange(user),
                 OTP
@@ -627,18 +620,17 @@ public class UserService {
         if (unleash.isEnabled(EMAIL_CHANGE_ENABLED.name())) {
             validateEmail(newEmail);
             UserModel user = getCurrentAuthenticatedUser();
-            String encryptedNewEmail = genericAesStaticEncryptorDecryptor.encrypt(newEmail);
             if (user.getEmail()
-                    .equals(encryptedNewEmail)) {
+                    .equals(newEmail)) {
                 throw new SimpleBadRequestException("New email cannot be same as current email");
             }
-            if (userRepo.existsByEmail(encryptedNewEmail)) {
+            if (userRepo.existsByEmail(newEmail)) {
                 throw new SimpleBadRequestException("Email: '" + newEmail + "' is already taken");
             }
-            String encryptedNormalizedNewEmail = genericAesStaticEncryptorDecryptor.encrypt(normalizeEmail(newEmail));
+            String normalizedNewEmail = normalizeEmail(newEmail);
             if (!user.getRealEmail()
-                    .equals(encryptedNormalizedNewEmail)) {
-                if (userRepo.existsByRealEmail(encryptedNormalizedNewEmail)) {
+                    .equals(normalizedNewEmail)) {
+                if (userRepo.existsByRealEmail(normalizedNewEmail)) {
                     throw new SimpleBadRequestException("Alias version of email: '" + newEmail + "' is already taken");
                 }
             }
@@ -653,7 +645,7 @@ public class UserService {
                     OTP
             );
             mailService.sendEmailAsync(
-                    genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                    user.getEmail(),
                     "Otp for email change in old email",
                     generateOtpForEmailChangeForOldEmail(user),
                     OTP
@@ -771,18 +763,17 @@ public class UserService {
                 throw new SimpleBadRequestException("Invalid Otp's");
             }
             String newEmail = genericAesRandomEncryptorDecryptor.decrypt(encryptedStoredNewEmail);
-            String encryptedNewEmail = genericAesStaticEncryptorDecryptor.encrypt(newEmail);
             if (user.getEmail()
-                    .equals(encryptedNewEmail)) {
+                    .equals(newEmail)) {
                 throw new SimpleBadRequestException("New email cannot be same as current email");
             }
-            if (userRepo.existsByEmail(encryptedNewEmail)) {
+            if (userRepo.existsByEmail(newEmail)) {
                 throw new SimpleBadRequestException("Email: '" + newEmail + "' is already taken");
             }
-            String encryptedNormalizedNewEmail = genericAesStaticEncryptorDecryptor.encrypt(normalizeEmail(newEmail));
+            String normalizedNewEmail = normalizeEmail(newEmail);
             if (!user.getRealEmail()
-                    .equals(encryptedNormalizedNewEmail)) {
-                if (userRepo.existsByRealEmail(encryptedNormalizedNewEmail)) {
+                    .equals(normalizedNewEmail)) {
+                if (userRepo.existsByRealEmail(normalizedNewEmail)) {
                     throw new SimpleBadRequestException("Alias version of email: '" + newEmail + "' is already taken");
                 }
             }
@@ -794,10 +785,10 @@ public class UserService {
             )) {
                 throw new SimpleBadRequestException("Invalid password");
             }
-            String oldEmail = genericAesStaticEncryptorDecryptor.decrypt(user.getEmail());
-            user.setEmail(encryptedNewEmail);
-            user.setRealEmail(encryptedNormalizedNewEmail);
-            user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+            String oldEmail = user.getEmail();
+            user.setEmail(newEmail);
+            user.setRealEmail(normalizedNewEmail);
+            user.recordUpdation("SELF");
             accessTokenUtility.revokeTokens(Set.of(user));
             try {
                 redisService.deleteAll(Set.of(
@@ -818,7 +809,7 @@ public class UserService {
             }
             return Map.of(
                     "message", "Email change successful. Please login again to continue",
-                    "user", mapperUtility.toUserSummaryDto(userRepo.save(user))
+                    "user", toUserSummaryDto(userRepo.save(user))
             );
         }
         throw new ServiceUnavailableException("Email change is currently disabled. Please try again later");
@@ -864,12 +855,12 @@ public class UserService {
         accessTokenUtility.revokeTokens(Set.of(user));
         user.recordAccountDeletionStatus(
                 true,
-                genericAesRandomEncryptorDecryptor.encrypt("SELF")
+                "SELF"
         );
         userRepo.save(user);
         if (unleash.isEnabled(EMAIL_CONFIRMATION_ON_SELF_ACCOUNT_DELETION.name())) {
             mailService.sendEmailAsync(
-                    genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                    user.getEmail(),
                     "Account deletion confirmation",
                     "",
                     ACCOUNT_DELETION_CONFIRMATION
@@ -916,7 +907,7 @@ public class UserService {
 
     private Map<String, String> sendEmailOtpToDeleteAccount(UserModel user) throws Exception {
         mailService.sendEmailAsync(
-                genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                user.getEmail(),
                 "Otp for account deletion",
                 generateEmailOtpForAccountDeletion(user),
                 OTP
@@ -1049,10 +1040,10 @@ public class UserService {
                     .body(Map.of("invalid_inputs", selfUpdationResult.getInvalidInputs()));
         }
         if (selfUpdationResult.isModified()) {
-            user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+            user.recordUpdation("SELF");
             if (unleash.isEnabled(EMAIL_CONFIRMATION_ON_SELF_UPDATE_DETAILS.name())) {
                 mailService.sendEmailAsync(
-                        genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                        user.getEmail(),
                         "Account details updated confirmation",
                         "",
                         SELF_UPDATE_DETAILS_CONFIRMATION
@@ -1065,14 +1056,14 @@ public class UserService {
             } else {
                 response.put("message", "User details updated successfully");
             }
-            response.put("user", mapperUtility.toUserSummaryDto(userRepo.save(user)));
+            response.put("user", toUserSummaryDto(userRepo.save(user)));
             return ResponseEntity.ok(response);
         }
         return ResponseEntity.ok(Map.of("message", "No details were updated"));
     }
 
     private SelfUpdationResultDto validateAndSet(UserModel user,
-                                                 SelfUpdationDto dto) throws Exception {
+                                                 SelfUpdationDto dto) {
         boolean isModified = false;
         boolean shouldRemoveTokens = false;
         Set<String> invalidInputs = new HashSet<>();
@@ -1125,15 +1116,14 @@ public class UserService {
         }
         if (dto.getUsername() != null &&
                 !dto.getUsername()
-                        .equals(genericAesStaticEncryptorDecryptor.decrypt(user.getUsername()))
+                        .equals(user.getUsername())
         ) {
             try {
                 validateUsername(dto.getUsername());
-                String encryptedUsername = genericAesStaticEncryptorDecryptor.encrypt(dto.getUsername());
-                if (userRepo.existsByUsername(encryptedUsername)) {
+                if (userRepo.existsByUsername(dto.getUsername())) {
                     invalidInputs.add("Username already taken");
                 } else {
-                    user.setUsername(encryptedUsername);
+                    user.setUsername(dto.getUsername());
                     isModified = true;
                     shouldRemoveTokens = true;
                 }

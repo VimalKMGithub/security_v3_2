@@ -37,7 +37,7 @@ public class UserController {
     }
 
     @PostMapping("/forgot/password")
-    public ResponseEntity<Map<String, Object>> forgotPassword(@RequestParam String usernameOrEmail) throws Exception {
+    public ResponseEntity<Map<String, Object>> forgotPassword(@RequestParam String usernameOrEmail) {
         return userService.forgotPassword(usernameOrEmail);
     }
 
@@ -57,7 +57,7 @@ public class UserController {
     }
 
     @PostMapping("/change/password")
-    public ResponseEntity<Map<String, Object>> changePassword(@RequestBody ChangePwdDto dto) throws Exception {
+    public ResponseEntity<Map<String, Object>> changePassword(@RequestBody ChangePwdDto dto) {
         return userService.changePassword(dto);
     }
 
