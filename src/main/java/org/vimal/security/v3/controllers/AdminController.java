@@ -87,7 +87,7 @@ public class AdminController {
     @GetMapping("/read/roles")
     @PreAuthorize("@PreAuth.canReadRoles()")
     public ResponseEntity<Map<String, Object>> readRoles(@RequestBody Set<String> roleNames,
-                                                         @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) throws Exception {
+                                                         @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) {
         return adminService.readRoles(
                 roleNames,
                 leniency
@@ -107,7 +107,7 @@ public class AdminController {
     @GetMapping("/read/permissions")
     @PreAuthorize("@PreAuth.canReadPermissions()")
     public ResponseEntity<Map<String, Object>> readPermissions(@RequestBody Set<String> permissionNames,
-                                                               @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) throws Exception {
+                                                               @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) {
         return adminService.readPermissions(
                 permissionNames,
                 leniency

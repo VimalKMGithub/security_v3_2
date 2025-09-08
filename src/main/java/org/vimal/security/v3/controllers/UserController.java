@@ -22,7 +22,7 @@ public class UserController {
     }
 
     @GetMapping("/getSelfDetails")
-    public ResponseEntity<UserSummaryDto> getSelfDetails() throws Exception {
+    public ResponseEntity<UserSummaryDto> getSelfDetails() {
         return ResponseEntity.ok(userService.getSelfDetails());
     }
 
