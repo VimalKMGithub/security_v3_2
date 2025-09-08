@@ -15,5 +15,4 @@ public class ValidateInputsForDeleteOrReadUsersResultDto {
     private Set<String> invalidInputs;
     private Set<String> usernames;
     private Set<String> emails;
-    private Set<String> ownUserInInputs;
 }

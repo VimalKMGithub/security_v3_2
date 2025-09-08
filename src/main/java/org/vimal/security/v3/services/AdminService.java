@@ -8,8 +8,6 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.vimal.security.v3.dtos.*;
-import org.vimal.security.v3.encryptordecryptors.GenericAesRandomEncryptorDecryptor;
-import org.vimal.security.v3.encryptordecryptors.GenericAesStaticEncryptorDecryptor;
 import org.vimal.security.v3.exceptions.ServiceUnavailableException;
 import org.vimal.security.v3.exceptions.SimpleBadRequestException;
 import org.vimal.security.v3.impls.UserDetailsImpl;
@@ -20,7 +18,6 @@ import org.vimal.security.v3.repos.PermissionRepo;
 import org.vimal.security.v3.repos.RoleRepo;
 import org.vimal.security.v3.repos.UserRepo;
 import org.vimal.security.v3.utils.AccessTokenUtility;
-import org.vimal.security.v3.utils.MapperUtility;
 
 import java.time.Instant;
 import java.util.*;
@@ -28,6 +25,8 @@ import java.util.*;
 import static org.vimal.security.v3.enums.FeatureFlags.*;
 import static org.vimal.security.v3.enums.SystemRoles.ROLE_PRIORITY_MAP;
 import static org.vimal.security.v3.enums.SystemRoles.TOP_ROLES;
+import static org.vimal.security.v3.utils.MapperUtility.toRoleSummaryDto;
+import static org.vimal.security.v3.utils.MapperUtility.toUserSummaryToCompanyUsersDto;
 import static org.vimal.security.v3.utils.ToggleUtility.TOGGLE_TYPE;
 import static org.vimal.security.v3.utils.UserUtility.getCurrentAuthenticatedUserDetails;
 import static org.vimal.security.v3.utils.ValidationUtility.*;
@@ -49,13 +48,10 @@ public class AdminService {
     private final PermissionRepo permissionRepo;
     private final PasswordEncoder passwordEncoder;
     private final Unleash unleash;
-    private final MapperUtility mapperUtility;
     private final AccessTokenUtility accessTokenUtility;
-    private final GenericAesStaticEncryptorDecryptor genericAesStaticEncryptorDecryptor;
-    private final GenericAesRandomEncryptorDecryptor genericAesRandomEncryptorDecryptor;
 
     public ResponseEntity<Map<String, Object>> createUsers(Set<UserCreationDto> dtos,
-                                                           String leniency) throws Exception {
+                                                           String leniency) {
         boolean isLenient = validateLeniency(leniency);
         UserDetailsImpl creator = getCurrentAuthenticatedUserDetails();
         String creatorHighestTopRole = getUserHighestTopRole(creator);
@@ -114,7 +110,6 @@ public class AdminService {
                         .body(mapOfErrors);
             }
             Set<UserModel> newUsers = new HashSet<>();
-            String decryptedCreatorUsername = genericAesStaticEncryptorDecryptor.decrypt(creator.getUsername());
             for (UserCreationDto dto : dtos) {
                 if (isLenient) {
                     if (alreadyTakenUsernamesAndEmailsResult.getAlreadyTakenUsernames()
@@ -130,9 +125,7 @@ public class AdminService {
                     newUsers.add(toUserModel(
                                     dto,
                                     new HashSet<>(),
-                                    decryptedCreatorUsername,
-                                    validateInputsForUsersCreationResult.getUsernameToEncryptedUsernameMap(),
-                                    validateInputsForUsersCreationResult.getEmailToEncryptedEmailMap()
+                                    creator.getUsername()
                             )
                     );
                 } else {
@@ -146,9 +139,7 @@ public class AdminService {
                     newUsers.add(toUserModel(
                                     dto,
                                     rolesToAssign,
-                                    decryptedCreatorUsername,
-                                    validateInputsForUsersCreationResult.getUsernameToEncryptedUsernameMap(),
-                                    validateInputsForUsersCreationResult.getEmailToEncryptedEmailMap()
+                                    creator.getUsername()
                             )
                     );
                 }
@@ -166,7 +157,7 @@ public class AdminService {
             }
             List<UserSummaryToCompanyUsersDto> users = new ArrayList<>();
             for (UserModel userModel : userRepo.saveAll(newUsers)) {
-                users.add(mapperUtility.toUserSummaryToCompanyUsersDto(userModel));
+                users.add(toUserSummaryToCompanyUsersDto(userModel));
             }
             if (isLenient &&
                     !mapOfErrors.isEmpty()) {
@@ -240,16 +231,10 @@ public class AdminService {
     }
 
     private ValidateInputsForUsersCreationResultDto validateInputsForUsersCreation(Set<UserCreationDto> dtos,
-                                                                                   String creatorHighestTopRole) throws Exception {
+                                                                                   String creatorHighestTopRole) {
         Set<String> invalidInputs = new HashSet<>();
         Set<String> usernames = new HashSet<>();
-        Set<String> encryptedUsernames = new HashSet<>();
-        Map<String, String> encryptedUsernameToUsernameMap = new HashMap<>();
-        Map<String, String> usernameToEncryptedUsernameMap = new HashMap<>();
         Set<String> emails = new HashSet<>();
-        Set<String> encryptedEmails = new HashSet<>();
-        Map<String, String> encryptedEmailToEmailMap = new HashMap<>();
-        Map<String, String> emailToEncryptedEmailMap = new HashMap<>();
         Set<String> duplicateUsernamesInDtos = new HashSet<>();
         Set<String> duplicateEmailsInDtos = new HashSet<>();
         Set<String> roles = new HashSet<>();
@@ -260,7 +245,6 @@ public class AdminService {
         UserCreationDto tempDto;
         boolean removeFromDtos;
         boolean removeFromDtosSanitizeRoles;
-        String tempStr;
         while (iterator.hasNext()) {
             removeFromDtos = false;
             removeFromDtosSanitizeRoles = false;
@@ -273,18 +257,7 @@ public class AdminService {
             if (tempDto.getUsername() != null &&
                     USERNAME_PATTERN.matcher(tempDto.getUsername())
                             .matches()) {
-                if (usernames.add(tempDto.getUsername())) {
-                    tempStr = genericAesStaticEncryptorDecryptor.encrypt(tempDto.getUsername());
-                    encryptedUsernames.add(tempStr);
-                    encryptedUsernameToUsernameMap.put(
-                            tempStr,
-                            tempDto.getUsername()
-                    );
-                    usernameToEncryptedUsernameMap.put(
-                            tempDto.getUsername(),
-                            tempStr
-                    );
-                } else {
+                if (!usernames.add(tempDto.getUsername())) {
                     duplicateUsernamesInDtos.add(tempDto.getUsername());
                     removeFromDtos = true;
                 }
@@ -292,18 +265,7 @@ public class AdminService {
             if (tempDto.getEmail() != null &&
                     EMAIL_PATTERN.matcher(tempDto.getEmail())
                             .matches()) {
-                if (emails.add(tempDto.getEmail())) {
-                    tempStr = genericAesStaticEncryptorDecryptor.encrypt(tempDto.getEmail());
-                    encryptedEmails.add(tempStr);
-                    encryptedEmailToEmailMap.put(
-                            tempStr,
-                            tempDto.getEmail()
-                    );
-                    emailToEncryptedEmailMap.put(
-                            tempDto.getEmail(),
-                            tempStr
-                    );
-                } else {
+                if (!emails.add(tempDto.getEmail())) {
                     duplicateEmailsInDtos.add(tempDto.getEmail());
                     removeFromDtos = true;
                 }
@@ -325,12 +287,8 @@ public class AdminService {
         }
         return new ValidateInputsForUsersCreationResultDto(
                 invalidInputs,
-                encryptedUsernames,
-                encryptedUsernameToUsernameMap,
-                usernameToEncryptedUsernameMap,
-                encryptedEmails,
-                encryptedEmailToEmailMap,
-                emailToEncryptedEmailMap,
+                usernames,
+                emails,
                 duplicateUsernamesInDtos,
                 duplicateEmailsInDtos,
                 roles,
@@ -416,14 +374,12 @@ public class AdminService {
 
     private AlreadyTakenUsernamesAndEmailsResultDto getAlreadyTakenUsernamesAndEmails(ValidateInputsForUsersCreationResultDto validateInputsForUsersCreationResult) {
         Set<String> alreadyTakenUsernames = new HashSet<>();
-        for (UserModel user : userRepo.findByUsernameIn(validateInputsForUsersCreationResult.getEncryptedUsernames())) {
-            alreadyTakenUsernames.add(validateInputsForUsersCreationResult.getEncryptedUsernameToUsernameMap()
-                    .get(user.getUsername()));
+        for (UserModel user : userRepo.findByUsernameIn(validateInputsForUsersCreationResult.getUsernames())) {
+            alreadyTakenUsernames.add(user.getUsername());
         }
         Set<String> alreadyTakenEmails = new HashSet<>();
-        for (UserModel user : userRepo.findByEmailIn(validateInputsForUsersCreationResult.getEncryptedEmails())) {
-            alreadyTakenEmails.add(validateInputsForUsersCreationResult.getEncryptedEmailToEmailMap()
-                    .get(user.getEmail()));
+        for (UserModel user : userRepo.findByEmailIn(validateInputsForUsersCreationResult.getEmails())) {
+            alreadyTakenEmails.add(user.getEmail());
         }
         return new AlreadyTakenUsernamesAndEmailsResultDto(
                 alreadyTakenUsernames,
@@ -433,14 +389,11 @@ public class AdminService {
 
     private UserModel toUserModel(UserCreationDto dto,
                                   Set<RoleModel> roles,
-                                  String decryptedCreatorUsername,
-                                  Map<String, String> usernameToEncryptedUsernameMap,
-                                  Map<String, String> emailToEncryptedEmailMap) throws Exception {
-        String encryptedEmail = emailToEncryptedEmailMap.get(dto.getEmail());
+                                  String creatorUsername) {
         return UserModel.builder()
-                .username(usernameToEncryptedUsernameMap.get(dto.getUsername()))
-                .email(encryptedEmail)
-                .realEmail(encryptedEmail)
+                .username(dto.getUsername())
+                .email(dto.getEmail())
+                .realEmail(dto.getEmail())
                 .password(passwordEncoder.encode(dto.getPassword()))
                 .firstName(dto.getFirstName())
                 .middleName(dto.getMiddleName())
@@ -450,10 +403,10 @@ public class AdminService {
                 .accountEnabled(dto.isAccountEnabled())
                 .accountLocked(dto.isAccountLocked())
                 .lockedAt(dto.isAccountLocked() ? Instant.now() : null)
-                .createdBy(genericAesRandomEncryptorDecryptor.encrypt(decryptedCreatorUsername))
+                .createdBy(creatorUsername)
                 .accountDeleted(dto.isAccountDeleted())
                 .accountDeletedAt(dto.isAccountDeleted() ? Instant.now() : null)
-                .accountDeletedBy(dto.isAccountDeleted() ? genericAesRandomEncryptorDecryptor.encrypt(decryptedCreatorUsername) : null)
+                .accountDeletedBy(dto.isAccountDeleted() ? creatorUsername : null)
                 .build();
     }
 
@@ -533,7 +486,7 @@ public class AdminService {
     private ValidateInputsForDeleteUsersResultDto validateInputsForDeleteUsers(Set<String> usernamesOrEmails,
                                                                                UserDetailsImpl deleter,
                                                                                String deleterHighestTopRole,
-                                                                               boolean hardDelete) throws Exception {
+                                                                               boolean hardDelete) {
         Variant variant = unleash.getVariant(ALLOW_DELETE_USERS.name());
         if (entryCheck(
                 variant,
@@ -544,25 +497,19 @@ public class AdminService {
                     variant,
                     usernamesOrEmails
             );
-            String decryptedDeleterUsername = genericAesStaticEncryptorDecryptor.decrypt(deleter.getUsername());
-            String decryptedDeleterEmail = genericAesStaticEncryptorDecryptor.decrypt(deleter.getUser().getEmail());
-            ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsersResult = validateInputsForDeleteOrReadUsers(
-                    usernamesOrEmails,
-                    decryptedDeleterUsername,
-                    decryptedDeleterEmail
-            );
+            ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsersResult = validateInputsForDeleteOrReadUsers(usernamesOrEmails);
             Map<String, Object> mapOfErrors = new HashMap<>();
             if (!validateInputsForDeleteOrReadUsersResult.getInvalidInputs()
                     .isEmpty()) {
                 mapOfErrors.put("invalid_inputs", validateInputsForDeleteOrReadUsersResult.getInvalidInputs());
             }
-            if (!validateInputsForDeleteOrReadUsersResult.getOwnUserInInputs()
-                    .isEmpty()) {
-                mapOfErrors.put("you_cannot_delete_your_own_account_using_this_endpoint", validateInputsForDeleteOrReadUsersResult.getOwnUserInInputs());
+            Set<String> ownUserToDelete = checkIfOwnUserInRequest(deleter, validateInputsForDeleteOrReadUsersResult);
+            if (!ownUserToDelete.isEmpty()) {
+                mapOfErrors.put("you_cannot_delete_your_own_account_using_this_endpoint", ownUserToDelete);
             }
             return getUsersDeletionResult(
                     validateInputsForDeleteOrReadUsersResult,
-                    decryptedDeleterUsername,
+                    deleter.getUsername(),
                     deleterHighestTopRole,
                     hardDelete,
                     mapOfErrors
@@ -601,13 +548,10 @@ public class AdminService {
         }
     }
 
-    private ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsers(Set<String> usernamesOrEmails,
-                                                                                           String userUsername,
-                                                                                           String userEmail) {
+    private ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsers(Set<String> usernamesOrEmails) {
         Set<String> invalidInputs = new HashSet<>();
         Set<String> emails = new HashSet<>();
         Set<String> usernames = new HashSet<>();
-        Set<String> ownUserInInputs = new HashSet<>();
         usernamesOrEmails.remove(null);
         for (String identifier : usernamesOrEmails) {
             if (USERNAME_PATTERN.matcher(identifier)
@@ -620,44 +564,42 @@ public class AdminService {
                 invalidInputs.add(identifier);
             }
         }
-        if (usernames.contains(userUsername)) {
-            ownUserInInputs.add(userUsername);
-            usernames.remove(userUsername);
-        }
-        if (emails.contains(userEmail)) {
-            ownUserInInputs.add(userEmail);
-            emails.remove(userEmail);
-        }
         return new ValidateInputsForDeleteOrReadUsersResultDto(
                 invalidInputs,
                 usernames,
-                emails,
-                ownUserInInputs
+                emails
         );
+    }
+
+    private Set<String> checkIfOwnUserInRequest(UserDetailsImpl deleter,
+                                                ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsersResult) {
+        Set<String> ownUserToDelete = new HashSet<>();
+        if (validateInputsForDeleteOrReadUsersResult.getUsernames()
+                .contains(deleter.getUsername())) {
+            ownUserToDelete.add(deleter.getUsername());
+        }
+        if (validateInputsForDeleteOrReadUsersResult.getEmails()
+                .contains(deleter.getUser()
+                        .getEmail())) {
+            ownUserToDelete.add(deleter.getUser()
+                    .getEmail());
+        }
+        return ownUserToDelete;
     }
 
     private ValidateInputsForDeleteUsersResultDto getUsersDeletionResult(ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsersResult,
                                                                          String deleterUsername,
                                                                          String deleterHighestTopRole,
                                                                          boolean hardDelete,
-                                                                         Map<String, Object> mapOfErrors) throws Exception {
-        Set<String> tempSet = new HashSet<>();
-        Map<String, String> tempMap = new HashMap<>();
-        String tempStr;
-        for (String username : validateInputsForDeleteOrReadUsersResult.getUsernames()) {
-            tempStr = genericAesStaticEncryptorDecryptor.encrypt(username);
-            tempSet.add(tempStr);
-            tempMap.put(tempStr, username);
-        }
+                                                                         Map<String, Object> mapOfErrors) {
         Set<UserModel> usersToDelete = new HashSet<>();
         Set<String> restrictedRoles = new HashSet<>();
         boolean tempBoolean;
-        for (UserModel userModel : userRepo.findByUsernameIn(tempSet)) {
-            tempStr = tempMap.get(userModel.getUsername());
+        for (UserModel user : userRepo.findByUsernameIn(validateInputsForDeleteOrReadUsersResult.getUsernames())) {
             validateInputsForDeleteOrReadUsersResult.getUsernames()
-                    .remove(tempStr);
+                    .remove(user.getUsername());
             tempBoolean = userDeletionResult(
-                    userModel,
+                    user,
                     deleterUsername,
                     deleterHighestTopRole,
                     restrictedRoles,
@@ -666,22 +608,14 @@ public class AdminService {
             );
             if (tempBoolean) {
                 validateInputsForDeleteOrReadUsersResult.getUsernames()
-                        .add(tempStr);
+                        .add(user.getUsername());
             }
         }
-        tempSet.clear();
-        tempMap.clear();
-        for (String email : validateInputsForDeleteOrReadUsersResult.getEmails()) {
-            tempStr = genericAesStaticEncryptorDecryptor.encrypt(email);
-            tempSet.add(tempStr);
-            tempMap.put(tempStr, email);
-        }
-        for (UserModel userModel : userRepo.findByEmailIn(tempSet)) {
-            tempStr = tempMap.get(userModel.getEmail());
+        for (UserModel user : userRepo.findByEmailIn(validateInputsForDeleteOrReadUsersResult.getEmails())) {
             validateInputsForDeleteOrReadUsersResult.getEmails()
-                    .remove(tempStr);
+                    .remove(user.getEmail());
             tempBoolean = userDeletionResult(
-                    userModel,
+                    user,
                     deleterUsername,
                     deleterHighestTopRole,
                     restrictedRoles,
@@ -690,7 +624,7 @@ public class AdminService {
             );
             if (tempBoolean) {
                 validateInputsForDeleteOrReadUsersResult.getEmails()
-                        .add(tempStr);
+                        .add(user.getEmail());
             }
         }
         if (!validateInputsForDeleteOrReadUsersResult.getUsernames()
@@ -715,7 +649,7 @@ public class AdminService {
                                        String deleterHighestTopRole,
                                        Set<String> restrictedRoles,
                                        Set<UserModel> usersToDelete,
-                                       boolean hardDelete) throws Exception {
+                                       boolean hardDelete) {
         boolean recollectIdentifier = false;
         if (hardDelete) {
             boolean collectUser = validateRoleRestriction(
@@ -736,7 +670,7 @@ public class AdminService {
                 if (!collectUser) {
                     userModel.recordAccountDeletionStatus(
                             true,
-                            genericAesRandomEncryptorDecryptor.encrypt(deleterUsername)
+                            deleterUsername
                     );
                     usersToDelete.add(userModel);
                 }
@@ -773,7 +707,7 @@ public class AdminService {
     }
 
     public ResponseEntity<Map<String, Object>> readUsers(Set<String> usernamesOrEmails,
-                                                         String leniency) throws Exception {
+                                                         String leniency) {
         boolean isLenient = validateLeniency(leniency);
         UserDetailsImpl reader = getCurrentAuthenticatedUserDetails();
         String readerHighestTopRole = getUserHighestTopRole(reader);
@@ -787,29 +721,11 @@ public class AdminService {
                     variant,
                     usernamesOrEmails
             );
-            ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsersResult = validateInputsForDeleteOrReadUsers(
-                    usernamesOrEmails,
-                    genericAesStaticEncryptorDecryptor.decrypt(reader.getUsername()),
-                    genericAesStaticEncryptorDecryptor.decrypt(reader.getUser().getEmail())
-            );
+            ValidateInputsForDeleteOrReadUsersResultDto validateInputsForDeleteOrReadUsersResult = validateInputsForDeleteOrReadUsers(usernamesOrEmails);
             Map<String, Object> mapOfErrors = new HashMap<>();
             if (!validateInputsForDeleteOrReadUsersResult.getInvalidInputs()
                     .isEmpty()) {
                 mapOfErrors.put("invalid_inputs", validateInputsForDeleteOrReadUsersResult.getInvalidInputs());
-            }
-            if (!validateInputsForDeleteOrReadUsersResult.getOwnUserInInputs()
-                    .isEmpty()) {
-                for (String ownIdentifier : validateInputsForDeleteOrReadUsersResult.getOwnUserInInputs()) {
-                    if (USERNAME_PATTERN.matcher(ownIdentifier)
-                            .matches()) {
-                        validateInputsForDeleteOrReadUsersResult.getUsernames()
-                                .add(ownIdentifier);
-                    } else if (EMAIL_PATTERN.matcher(ownIdentifier)
-                            .matches()) {
-                        validateInputsForDeleteOrReadUsersResult.getEmails()
-                                .add(ownIdentifier);
-                    }
-                }
             }
             if (!isLenient) {
                 if (!mapOfErrors.isEmpty()) {
@@ -833,31 +749,16 @@ public class AdminService {
                 }
                 return ResponseEntity.ok(Map.of("message", "No users returned"));
             }
-            Set<String> tempSet = new HashSet<>();
-            Map<String, String> tempMap = new HashMap<>();
-            String tempStr;
-            for (String username : validateInputsForDeleteOrReadUsersResult.getUsernames()) {
-                tempStr = genericAesStaticEncryptorDecryptor.encrypt(username);
-                tempSet.add(tempStr);
-                tempMap.put(tempStr, username);
-            }
             List<UserSummaryToCompanyUsersDto> users = new ArrayList<>();
-            for (UserModel userModel : userRepo.findByUsernameIn(tempSet)) {
+            for (UserModel userModel : userRepo.findByUsernameIn(validateInputsForDeleteOrReadUsersResult.getUsernames())) {
                 validateInputsForDeleteOrReadUsersResult.getUsernames()
-                        .remove(tempMap.get(userModel.getUsername()));
-                users.add(mapperUtility.toUserSummaryToCompanyUsersDto(userModel));
+                        .remove(userModel.getUsername());
+                users.add(toUserSummaryToCompanyUsersDto(userModel));
             }
-            tempSet.clear();
-            tempMap.clear();
-            for (String email : validateInputsForDeleteOrReadUsersResult.getEmails()) {
-                tempStr = genericAesStaticEncryptorDecryptor.encrypt(email);
-                tempSet.add(tempStr);
-                tempMap.put(tempStr, email);
-            }
-            for (UserModel userModel : userRepo.findByEmailIn(tempSet)) {
+            for (UserModel userModel : userRepo.findByEmailIn(validateInputsForDeleteOrReadUsersResult.getEmails())) {
                 validateInputsForDeleteOrReadUsersResult.getEmails()
-                        .remove(tempMap.get(userModel.getEmail()));
-                users.add(mapperUtility.toUserSummaryToCompanyUsersDto(userModel));
+                        .remove(userModel.getEmail());
+                users.add(toUserSummaryToCompanyUsersDto(userModel));
             }
             if (!validateInputsForDeleteOrReadUsersResult.getUsernames()
                     .isEmpty()) {
@@ -1014,7 +915,7 @@ public class AdminService {
             }
             List<UserSummaryToCompanyUsersDto> updatedUsers = new ArrayList<>();
             for (UserModel userModel : userRepo.saveAll(usersUpdationWithNewDetailsResult.getUpdatedUsers())) {
-                updatedUsers.add(mapperUtility.toUserSummaryToCompanyUsersDto(userModel));
+                updatedUsers.add(toUserSummaryToCompanyUsersDto(userModel));
             }
             mapOfErrors.remove("missing_roles");
             if (isLenient &&
@@ -1060,53 +961,34 @@ public class AdminService {
     }
 
     private ValidateInputsForUsersUpdationResultDto validateInputsForUsersUpdation(Set<UserUpdationDto> dtos,
-                                                                                   String updaterHighestTopRole) throws Exception {
+                                                                                   String updaterHighestTopRole) {
         Set<String> invalidInputs = new HashSet<>();
         Set<String> usernames = new HashSet<>();
-        Set<String> encryptedUsernames = new HashSet<>();
-        Map<String, String> encryptedUsernameToUsernameMap = new HashMap<>();
-        Map<String, String> usernameToEncryptedUsernameMap = new HashMap<>();
         Set<String> emails = new HashSet<>();
-        Set<String> encryptedEmails = new HashSet<>();
-        Map<String, String> encryptedEmailToEmailMap = new HashMap<>();
-        Map<String, String> emailToEncryptedEmailMap = new HashMap<>();
         Set<String> duplicateUsernamesInDtos = new HashSet<>();
         Set<String> duplicateEmailsInDtos = new HashSet<>();
         Set<String> roles = new HashSet<>();
         Set<String> restrictedRoles = new HashSet<>();
         Set<String> oldUsernames = new HashSet<>();
-        Set<String> encryptedOldUsernames = new HashSet<>();
-        Map<String, String> encryptedOldUsernameToOldUsernameMap = new HashMap<>();
-        Map<String, String> oldUsernameToEncryptedOldUsernameMap = new HashMap<>();
         Set<String> duplicateOldUsernames = new HashSet<>();
         Set<String> invalidOldUsernames = new HashSet<>();
-        Map<String, String> encryptedUsernameToEncryptedOldUsernameMap = new HashMap<>();
-        Map<String, String> encryptedEmailToEncryptedOldUsernameMap = new HashMap<>();
+        Map<String, String> usernameToOldUsernameMap = new HashMap<>();
+        Map<String, String> emailToOldUsernameMap = new HashMap<>();
         dtos.remove(null);
         UserUpdationDto tempDto;
         boolean removeFromDtos;
         boolean removeFromDtosSanitizeRoles;
         String tempStr;
-        String encryptedOldUsername;
         Iterator<UserUpdationDto> iterator = dtos.iterator();
         while (iterator.hasNext()) {
             removeFromDtos = false;
             removeFromDtosSanitizeRoles = false;
             tempDto = iterator.next();
-            encryptedOldUsername = null;
+            tempStr = null;
             try {
                 validateUsername(tempDto.getOldUsername());
                 if (oldUsernames.add(tempDto.getOldUsername())) {
-                    encryptedOldUsername = genericAesStaticEncryptorDecryptor.encrypt(tempDto.getOldUsername());
-                    encryptedOldUsernames.add(encryptedOldUsername);
-                    encryptedOldUsernameToOldUsernameMap.put(
-                            encryptedOldUsername,
-                            tempDto.getOldUsername()
-                    );
-                    oldUsernameToEncryptedOldUsernameMap.put(
-                            tempDto.getOldUsername(),
-                            encryptedOldUsername
-                    );
+                    tempStr = tempDto.getOldUsername();
                 } else {
                     duplicateOldUsernames.add(tempDto.getOldUsername());
                     removeFromDtos = true;
@@ -1119,20 +1001,10 @@ public class AdminService {
                 try {
                     validateUsername(tempDto.getUsername());
                     if (usernames.add(tempDto.getUsername())) {
-                        tempStr = genericAesStaticEncryptorDecryptor.encrypt(tempDto.getUsername());
-                        encryptedUsernames.add(tempStr);
-                        encryptedUsernameToUsernameMap.put(
-                                tempStr,
-                                tempDto.getUsername()
-                        );
-                        usernameToEncryptedUsernameMap.put(
-                                tempDto.getUsername(),
-                                tempStr
-                        );
-                        if (encryptedOldUsername != null) {
-                            encryptedUsernameToEncryptedOldUsernameMap.put(
-                                    tempStr,
-                                    encryptedOldUsername
+                        if (tempStr != null) {
+                            usernameToOldUsernameMap.put(
+                                    tempDto.getUsername(),
+                                    tempStr
                             );
                         }
                     } else {
@@ -1148,20 +1020,10 @@ public class AdminService {
                 try {
                     validateEmail(tempDto.getEmail());
                     if (emails.add(tempDto.getEmail())) {
-                        tempStr = genericAesStaticEncryptorDecryptor.encrypt(tempDto.getEmail());
-                        encryptedEmails.add(tempStr);
-                        encryptedEmailToEmailMap.put(
-                                tempStr,
-                                tempDto.getEmail()
-                        );
-                        emailToEncryptedEmailMap.put(
-                                tempDto.getEmail(),
-                                tempStr
-                        );
-                        if (encryptedOldUsername != null) {
-                            encryptedEmailToEncryptedOldUsernameMap.put(
-                                    tempStr,
-                                    encryptedOldUsername
+                        if (tempStr != null) {
+                            emailToOldUsernameMap.put(
+                                    tempDto.getEmail(),
+                                    tempStr
                             );
                         }
                     } else {
@@ -1214,23 +1076,17 @@ public class AdminService {
         }
         return new ValidateInputsForUsersUpdationResultDto(
                 invalidInputs,
-                encryptedUsernames,
-                encryptedUsernameToUsernameMap,
-                usernameToEncryptedUsernameMap,
-                encryptedEmails,
-                encryptedEmailToEmailMap,
-                emailToEncryptedEmailMap,
+                usernames,
+                emails,
                 duplicateUsernamesInDtos,
                 duplicateEmailsInDtos,
                 roles,
                 restrictedRoles,
-                encryptedOldUsernames,
-                encryptedOldUsernameToOldUsernameMap,
-                oldUsernameToEncryptedOldUsernameMap,
+                oldUsernames,
                 duplicateOldUsernames,
                 invalidOldUsernames,
-                encryptedUsernameToEncryptedOldUsernameMap,
-                encryptedEmailToEncryptedOldUsernameMap
+                usernameToOldUsernameMap,
+                emailToOldUsernameMap
         );
     }
 
@@ -1250,24 +1106,22 @@ public class AdminService {
         Set<String> alreadyTakenUsernames = new HashSet<>();
         Set<String> alreadyTakenEmails = new HashSet<>();
         String requesterer;
-        for (UserModel userModel : userRepo.findByUsernameIn(validateInputsForUsersUpdationResult.getEncryptedUsernames())) {
-            requesterer = validateInputsForUsersUpdationResult.getEncryptedUsernameToEncryptedOldUsernameMap()
+        for (UserModel userModel : userRepo.findByUsernameIn(validateInputsForUsersUpdationResult.getUsernames())) {
+            requesterer = validateInputsForUsersUpdationResult.getUsernameToOldUsernameMap()
                     .get(userModel.getUsername());
             if (requesterer != null &&
                     !userModel.getUsername()
                             .equals(requesterer)) {
-                alreadyTakenUsernames.add(validateInputsForUsersUpdationResult.getEncryptedUsernameToUsernameMap()
-                        .get(userModel.getUsername()));
+                alreadyTakenUsernames.add(userModel.getUsername());
             }
         }
-        for (UserModel userModel : userRepo.findByEmailIn(validateInputsForUsersUpdationResult.getEncryptedEmails())) {
-            requesterer = validateInputsForUsersUpdationResult.getEncryptedEmailToEncryptedOldUsernameMap()
+        for (UserModel userModel : userRepo.findByEmailIn(validateInputsForUsersUpdationResult.getEmails())) {
+            requesterer = validateInputsForUsersUpdationResult.getEmailToOldUsernameMap()
                     .get(userModel.getEmail());
             if (requesterer != null &&
                     !userModel.getUsername()
                             .equals(requesterer)) {
-                alreadyTakenEmails.add(validateInputsForUsersUpdationResult.getEncryptedEmailToEmailMap()
-                        .get(userModel.getEmail()));
+                alreadyTakenEmails.add(userModel.getEmail());
             }
         }
         return new AlreadyTakenUsernamesAndEmailsResultDto(
@@ -1281,10 +1135,10 @@ public class AdminService {
                                                                            AlreadyTakenUsernamesAndEmailsResultDto alreadyTakenUsernamesAndEmailsResult,
                                                                            UserDetailsImpl updater,
                                                                            String updaterHighestTopRole,
-                                                                           Map<String, Object> mapOfErrors) throws Exception {
-        Map<String, UserModel> encryptedOldUsernameToUserMap = new HashMap<>();
-        for (UserModel user : userRepo.findByUsernameIn(validateInputsForUsersUpdationResult.getEncryptedOldUsernames())) {
-            encryptedOldUsernameToUserMap.put(user.getUsername(), user);
+                                                                           Map<String, Object> mapOfErrors) {
+        Map<String, UserModel> oldUsernameToUserMap = new HashMap<>();
+        for (UserModel user : userRepo.findByUsernameIn(validateInputsForUsersUpdationResult.getOldUsernames())) {
+            oldUsernameToUserMap.put(user.getUsername(), user);
         }
         Map<String, RoleModel> roleNameToRoleMap = resolveRoles(validateInputsForUsersUpdationResult.getRoles());
         if (!validateInputsForUsersUpdationResult.getRoles().isEmpty()) {
@@ -1294,17 +1148,13 @@ public class AdminService {
         Set<UUID> idsOfUsersWeHaveToRemoveTokens = new HashSet<>();
         Set<String> restrictedRoles = new HashSet<>();
         Set<String> notFoundUsersWithOldUsernames = new HashSet<>();
-        String tempStr;
         boolean isUpdated;
         boolean shouldRemoveTokens;
         boolean tempBoolean;
-        String decryptedUpdaterUsername = genericAesStaticEncryptorDecryptor.decrypt(updater.getUsername());
         for (UserUpdationDto dto : dtos) {
-            tempStr = dto.getOldUsername();
-            UserModel userToUpdate = encryptedOldUsernameToUserMap.get(validateInputsForUsersUpdationResult.getOldUsernameToEncryptedOldUsernameMap()
-                    .get(tempStr));
+            UserModel userToUpdate = oldUsernameToUserMap.get(dto.getOldUsername());
             if (userToUpdate == null) {
-                notFoundUsersWithOldUsernames.add(tempStr);
+                notFoundUsersWithOldUsernames.add(dto.getOldUsername());
                 continue;
             }
             if (!userToUpdate.getRoles()
@@ -1325,10 +1175,9 @@ public class AdminService {
                         .contains(dto.getUsername())) {
                     continue;
                 }
-                tempStr = validateInputsForUsersUpdationResult.getUsernameToEncryptedUsernameMap()
-                        .get(dto.getUsername());
-                if (!tempStr.equals(userToUpdate.getUsername())) {
-                    userToUpdate.setUsername(tempStr);
+                if (!dto.getUsername()
+                        .equals(userToUpdate.getUsername())) {
+                    userToUpdate.setUsername(dto.getUsername());
                     isUpdated = true;
                     shouldRemoveTokens = true;
                 }
@@ -1338,11 +1187,10 @@ public class AdminService {
                         .contains(dto.getEmail())) {
                     continue;
                 }
-                tempStr = validateInputsForUsersUpdationResult.getEmailToEncryptedEmailMap()
-                        .get(dto.getEmail());
-                if (!tempStr.equals(userToUpdate.getEmail())) {
-                    userToUpdate.setEmail(tempStr);
-                    userToUpdate.setRealEmail(tempStr);
+                if (!dto.getEmail()
+                        .equals(userToUpdate.getEmail())) {
+                    userToUpdate.setEmail(dto.getEmail());
+                    userToUpdate.setRealEmail(dto.getEmail());
                     isUpdated = true;
                     shouldRemoveTokens = true;
                 }
@@ -1413,13 +1261,13 @@ public class AdminService {
             if (dto.isAccountDeleted() != userToUpdate.isAccountDeleted()) {
                 userToUpdate.recordAccountDeletionStatus(
                         dto.isAccountDeleted(),
-                        genericAesRandomEncryptorDecryptor.encrypt(decryptedUpdaterUsername)
+                        updater.getUsername()
                 );
                 isUpdated = true;
                 shouldRemoveTokens = true;
             }
             if (isUpdated) {
-                userToUpdate.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt(decryptedUpdaterUsername));
+                userToUpdate.recordUpdation(updater.getUsername());
                 updatedUsers.add(userToUpdate);
                 if (shouldRemoveTokens) {
                     idsOfUsersWeHaveToRemoveTokens.add(userToUpdate.getId());
@@ -1435,8 +1283,8 @@ public class AdminService {
         );
     }
 
-    public ResponseEntity<Map<String, Object>> createRoles(Set<RoleCreationDto> dtos,
-                                                           String leniency) throws Exception {
+    public ResponseEntity<Map<String, Object>> createRoles(Set<RoleCreationUpdationDto> dtos,
+                                                           String leniency) {
         boolean isLenient = validateLeniency(leniency);
         UserDetailsImpl creator = getCurrentAuthenticatedUserDetails();
         String creatorHighestTopRole = getUserHighestTopRole(creator);
@@ -1489,8 +1337,7 @@ public class AdminService {
                         .body(mapOfErrors);
             }
             Set<RoleModel> newRoles = new HashSet<>();
-            String decryptedCreatorUsername = genericAesStaticEncryptorDecryptor.decrypt(creator.getUsername());
-            for (RoleCreationDto dto : dtos) {
+            for (RoleCreationUpdationDto dto : dtos) {
                 if (alreadyTakenRoleNames.contains(dto.getRoleName())) {
                     continue;
                 }
@@ -1499,7 +1346,7 @@ public class AdminService {
                     newRoles.add(toRoleModel(
                                     dto,
                                     new HashSet<>(),
-                                    decryptedCreatorUsername
+                                    creator.getUsername()
                             )
                     );
                 } else {
@@ -1513,7 +1360,7 @@ public class AdminService {
                     newRoles.add(toRoleModel(
                                     dto,
                                     permissionsToAssign,
-                                    decryptedCreatorUsername
+                                    creator.getUsername()
                             )
                     );
                 }
@@ -1531,7 +1378,7 @@ public class AdminService {
             }
             List<RoleSummaryDto> roles = new ArrayList<>();
             for (RoleModel role : roleRepo.saveAll(newRoles)) {
-                roles.add(mapperUtility.toRoleSummaryDto(role));
+                roles.add(toRoleSummaryDto(role));
             }
             if (isLenient &&
                     !mapOfErrors.isEmpty()) {
@@ -1553,7 +1400,7 @@ public class AdminService {
     }
 
     private void validateDtosSizeForRolesCreation(Variant variant,
-                                                  Set<RoleCreationDto> dtos) {
+                                                  Set<RoleCreationUpdationDto> dtos) {
         if (dtos.isEmpty()) {
             throw new SimpleBadRequestException("No roles to create");
         }
@@ -1575,15 +1422,15 @@ public class AdminService {
         }
     }
 
-    private ValidateInputsForRolesCreationOrUpdationResultDto validateInputsForRolesCreationOrUpdation(Set<RoleCreationDto> dtos) {
+    private ValidateInputsForRolesCreationOrUpdationResultDto validateInputsForRolesCreationOrUpdation(Set<RoleCreationUpdationDto> dtos) {
         Set<String> invalidInputs = new HashSet<>();
         Set<String> roleNames = new HashSet<>();
         Set<String> duplicateRoleNamesInDtos = new HashSet<>();
         Set<String> permissions = new HashSet<>();
         dtos.remove(null);
-        Iterator<RoleCreationDto> iterator = dtos.iterator();
+        Iterator<RoleCreationUpdationDto> iterator = dtos.iterator();
         boolean removeFromDtos;
-        RoleCreationDto tempDto;
+        RoleCreationUpdationDto tempDto;
         while (iterator.hasNext()) {
             removeFromDtos = false;
             tempDto = iterator.next();
@@ -1677,14 +1524,14 @@ public class AdminService {
         return resolvedRolesMap;
     }
 
-    private RoleModel toRoleModel(RoleCreationDto dto,
+    private RoleModel toRoleModel(RoleCreationUpdationDto dto,
                                   Set<PermissionModel> permissions,
-                                  String creator) throws Exception {
+                                  String creator) {
         return RoleModel.builder()
                 .roleName(dto.getRoleName())
                 .description(dto.getDescription())
                 .permissions(permissions)
-                .createdBy(genericAesRandomEncryptorDecryptor.encrypt(creator))
+                .createdBy(creator)
                 .build();
     }
 
@@ -1894,7 +1741,7 @@ public class AdminService {
     }
 
     public ResponseEntity<Map<String, Object>> readRoles(Set<String> roleNames,
-                                                         String leniency) throws Exception {
+                                                         String leniency) {
         boolean isLenient = validateLeniency(leniency);
         UserDetailsImpl reader = getCurrentAuthenticatedUserDetails();
         String readerHighestTopRole = getUserHighestTopRole(reader);
@@ -1932,7 +1779,7 @@ public class AdminService {
             }
             List<RoleSummaryDto> roles = new ArrayList<>();
             for (RoleModel role : roleRepo.findAllById(roleNames)) {
-                roles.add(mapperUtility.toRoleSummaryDto(role));
+                roles.add(toRoleSummaryDto(role));
                 roleNames.remove(role.getRoleName());
             }
             if (!roleNames.isEmpty()) {
@@ -1996,7 +1843,7 @@ public class AdminService {
         }
     }
 
-    public ResponseEntity<Map<String, Object>> updateRoles(Set<RoleCreationDto> dtos,
+    public ResponseEntity<Map<String, Object>> updateRoles(Set<RoleCreationUpdationDto> dtos,
                                                            String leniency) throws Exception {
         boolean isLenient = validateLeniency(leniency);
         UserDetailsImpl updater = getCurrentAuthenticatedUserDetails();
@@ -2110,7 +1957,7 @@ public class AdminService {
             }
             List<RoleSummaryDto> updatedRoles = new ArrayList<>();
             for (RoleModel role : roleRepo.saveAll(rolesUpdationWithNewDetailsResult.getUpdatedRoles())) {
-                updatedRoles.add(mapperUtility.toRoleSummaryDto(role));
+                updatedRoles.add(toRoleSummaryDto(role));
             }
             mapOfErrors.remove("missing_permissions");
             if (isLenient &&
@@ -2133,7 +1980,7 @@ public class AdminService {
     }
 
     private void validateDtosSizeForRolesUpdation(Variant variant,
-                                                  Set<RoleCreationDto> dtos) {
+                                                  Set<RoleCreationUpdationDto> dtos) {
         if (dtos.isEmpty()) {
             throw new SimpleBadRequestException("No roles to update");
         }
@@ -2155,16 +2002,15 @@ public class AdminService {
         }
     }
 
-    private RolesUpdationWithNewDetailsResultDto updateRolesWithNewDetails(Set<RoleCreationDto> dtos,
+    private RolesUpdationWithNewDetailsResultDto updateRolesWithNewDetails(Set<RoleCreationUpdationDto> dtos,
                                                                            Map<String, RoleModel> roleNameToRoleMap,
                                                                            Map<String, PermissionModel> resolvedPermissionsMap,
-                                                                           UserDetailsImpl updater) throws Exception {
+                                                                           UserDetailsImpl updater) {
         Set<RoleModel> updatedRoles = new HashSet<>();
         Set<String> removeTokensForRoleNames = new HashSet<>();
-        String decryptedUpdaterUsername = genericAesStaticEncryptorDecryptor.decrypt(updater.getUsername());
         boolean isUpdated;
         boolean shouldRemoveTokens;
-        for (RoleCreationDto dto : dtos) {
+        for (RoleCreationUpdationDto dto : dtos) {
             RoleModel roleToUpdate = roleNameToRoleMap.get(dto.getRoleName());
             if (roleToUpdate == null) {
                 continue;
@@ -2203,7 +2049,7 @@ public class AdminService {
                 }
             }
             if (isUpdated) {
-                roleToUpdate.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt(decryptedUpdaterUsername));
+                roleToUpdate.recordUpdation(updater.getUsername());
                 updatedRoles.add(roleToUpdate);
                 if (shouldRemoveTokens) {
                     removeTokensForRoleNames.add(roleToUpdate.getRoleName());
@@ -2217,7 +2063,7 @@ public class AdminService {
     }
 
     public ResponseEntity<Map<String, Object>> readPermissions(Set<String> permissionNames,
-                                                               String leniency) throws Exception {
+                                                               String leniency) {
         boolean isLenient = validateLeniency(leniency);
         UserDetailsImpl reader = getCurrentAuthenticatedUserDetails();
         String readerHighestTopRole = getUserHighestTopRole(reader);
@@ -2270,7 +2116,6 @@ public class AdminService {
             }
             List<PermissionModel> permissions = permissionRepo.findAllById(permissionNames);
             for (PermissionModel permission : permissions) {
-                permission.setCreatedBy(genericAesRandomEncryptorDecryptor.decrypt(permission.getCreatedBy()));
                 permissionNames.remove(permission.getPermissionName());
             }
             if (!permissionNames.isEmpty()) {

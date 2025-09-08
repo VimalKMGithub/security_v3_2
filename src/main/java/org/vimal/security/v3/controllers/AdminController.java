@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import org.vimal.security.v3.dtos.RoleCreationDto;
+import org.vimal.security.v3.dtos.RoleCreationUpdationDto;
 import org.vimal.security.v3.dtos.UserCreationDto;
 import org.vimal.security.v3.dtos.UserUpdationDto;
 import org.vimal.security.v3.services.AdminService;
@@ -23,7 +23,7 @@ public class AdminController {
     @PostMapping("/create/users")
     @PreAuthorize("@PreAuth.canCreateUsers()")
     public ResponseEntity<Map<String, Object>> createUsers(@RequestBody Set<UserCreationDto> dtos,
-                                                           @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) throws Exception {
+                                                           @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) {
         return adminService.createUsers(
                 dtos,
                 leniency
@@ -45,7 +45,7 @@ public class AdminController {
     @GetMapping("/read/users")
     @PreAuthorize("@PreAuth.canReadUsers()")
     public ResponseEntity<Map<String, Object>> readUsers(@RequestBody Set<String> usernamesOrEmails,
-                                                         @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) throws Exception {
+                                                         @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) {
         return adminService.readUsers(
                 usernamesOrEmails,
                 leniency
@@ -64,8 +64,8 @@ public class AdminController {
 
     @PostMapping("/create/roles")
     @PreAuthorize("@PreAuth.canCreateRoles()")
-    public ResponseEntity<Map<String, Object>> createRoles(@RequestBody Set<RoleCreationDto> dtos,
-                                                           @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) throws Exception {
+    public ResponseEntity<Map<String, Object>> createRoles(@RequestBody Set<RoleCreationUpdationDto> dtos,
+                                                           @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) {
         return adminService.createRoles(
                 dtos,
                 leniency
@@ -96,7 +96,7 @@ public class AdminController {
 
     @PutMapping("/update/roles")
     @PreAuthorize("@PreAuth.canUpdateRoles()")
-    public ResponseEntity<Map<String, Object>> updateRoles(@RequestBody Set<RoleCreationDto> dtos,
+    public ResponseEntity<Map<String, Object>> updateRoles(@RequestBody Set<RoleCreationUpdationDto> dtos,
                                                            @RequestParam(defaultValue = DEFAULT_TOGGLE) String leniency) throws Exception {
         return adminService.updateRoles(
                 dtos,
