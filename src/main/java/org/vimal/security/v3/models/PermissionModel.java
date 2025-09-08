@@ -42,7 +42,7 @@ public class PermissionModel {
     @Column(name = "created_by",
             nullable = false,
             updatable = false,
-            length = 512)
+            length = 100)
     private String createdBy;
 
     @PrePersist

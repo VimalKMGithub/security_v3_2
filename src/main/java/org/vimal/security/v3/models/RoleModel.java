@@ -70,11 +70,11 @@ public class RoleModel {
     @Column(name = "created_by",
             nullable = false,
             updatable = false,
-            length = 512)
+            length = 100)
     private String createdBy;
 
     @Column(name = "updated_by",
-            length = 512)
+            length = 100)
     private String updatedBy;
 
     @PrePersist

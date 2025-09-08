@@ -75,7 +75,7 @@ public class UserModel {
     @Column(name = "username",
             nullable = false,
             unique = true,
-            length = 512)
+            length = 100)
     private String username;
 
     @JsonIgnore
@@ -87,14 +87,14 @@ public class UserModel {
     @Column(name = "email",
             nullable = false,
             unique = true,
-            length = 512)
+            length = 320)
     private String email;
 
     @JsonIgnore
     @Column(name = "real_email",
             nullable = false,
             unique = true,
-            length = 512)
+            length = 320)
     private String realEmail;
 
     @Builder.Default
@@ -129,7 +129,7 @@ public class UserModel {
 
     @JsonIgnore
     @Column(name = "account_deleted_by",
-            length = 512)
+            length = 100)
     private String accountDeletedBy;
 
     @JsonIgnore
@@ -138,7 +138,7 @@ public class UserModel {
 
     @JsonIgnore
     @Column(name = "account_recovered_by",
-            length = 512)
+            length = 100)
     private String accountRecoveredBy;
 
     @JsonIgnore
@@ -223,11 +223,11 @@ public class UserModel {
     @Column(name = "created_by",
             nullable = false,
             updatable = false,
-            length = 512)
+            length = 100)
     private String createdBy;
 
     @Column(name = "updated_by",
-            length = 512)
+            length = 100)
     private String updatedBy;
 
     @PrePersist
