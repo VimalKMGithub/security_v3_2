@@ -71,13 +71,13 @@ public class AuthenticationService {
         UserModel user;
         if (EMAIL_PATTERN.matcher(usernameOrEmail)
                 .matches()) {
-            user = userRepo.findByEmail(genericAesStaticEncryptorDecryptor.encrypt(usernameOrEmail));
+            user = userRepo.findByEmail(usernameOrEmail);
             if (user == null) {
                 throw new BadCredentialsException("Invalid credentials");
             }
         } else if (USERNAME_PATTERN.matcher(usernameOrEmail)
                 .matches()) {
-            user = userRepo.findByUsername(genericAesStaticEncryptorDecryptor.encrypt(usernameOrEmail));
+            user = userRepo.findByUsername(usernameOrEmail);
             if (user == null) {
                 throw new BadCredentialsException("Invalid credentials");
             }
@@ -255,7 +255,7 @@ public class AuthenticationService {
             switch (type) {
                 case EMAIL_MFA -> {
                     mailService.sendEmailAsync(
-                            genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                            user.getEmail(),
                             "Otp to enable email Mfa",
                             generateOtpForEmailMfa(user),
                             OTP
@@ -272,7 +272,7 @@ public class AuthenticationService {
             switch (type) {
                 case EMAIL_MFA -> {
                     mailService.sendEmailAsync(
-                            genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                            user.getEmail(),
                             "Otp to disable email Mfa",
                             generateOtpForEmailMfa(user),
                             OTP
@@ -411,7 +411,7 @@ public class AuthenticationService {
                 } else {
                     user.removeMfaMethod(EMAIL_MFA);
                 }
-                user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+                user.recordUpdation("SELF");
                 accessTokenUtility.revokeTokens(Set.of(user));
                 userRepo.save(user);
                 emailConfirmationOnMfaToggle(
@@ -447,7 +447,7 @@ public class AuthenticationService {
         if (unleash.isEnabled(EMAIL_CONFIRMATION_ON_SELF_MFA_ENABLE_DISABLE.name())) {
             String action = toggle ? "enabled" : "disabled";
             mailService.sendEmailAsync(
-                    genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                    user.getEmail(),
                     "Mfa " + action + " confirmation",
                     "Your " + type + " Mfa has been " + action,
                     SELF_MFA_ENABLE_DISABLE_CONFIRMATION
@@ -474,7 +474,7 @@ public class AuthenticationService {
                         .orElseThrow(() -> new SimpleBadRequestException("Invalid user"));
                 user.addMfaMethod(AUTHENTICATOR_APP_MFA);
                 user.setAuthAppSecret(genericAesRandomEncryptorDecryptor.encrypt(secret));
-                user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+                user.recordUpdation("SELF");
                 accessTokenUtility.revokeTokens(Set.of(user));
                 userRepo.save(user);
                 emailConfirmationOnMfaToggle(
@@ -502,7 +502,7 @@ public class AuthenticationService {
         }
         user.removeMfaMethod(AUTHENTICATOR_APP_MFA);
         user.setAuthAppSecret(null);
-        user.recordUpdation(genericAesRandomEncryptorDecryptor.encrypt("SELF"));
+        user.recordUpdation("SELF");
         accessTokenUtility.revokeTokens(Set.of(user));
         userRepo.save(user);
         emailConfirmationOnMfaToggle(
@@ -574,7 +574,7 @@ public class AuthenticationService {
 
     private Map<String, String> sendEmailOtpToLoginMfa(UserModel user) throws Exception {
         mailService.sendEmailAsync(
-                genericAesStaticEncryptorDecryptor.decrypt(user.getEmail()),
+                user.getEmail(),
                 "Otp to verify email Mfa to login",
                 generateOtpForEmailMfa(user),
                 OTP
