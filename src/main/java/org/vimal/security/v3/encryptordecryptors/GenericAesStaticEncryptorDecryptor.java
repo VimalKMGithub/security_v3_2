@@ -17,8 +17,4 @@ public class GenericAesStaticEncryptorDecryptor {
     public String encrypt(String data) throws Exception {
         return aesStaticUtility.encrypt(data);
     }
-
-    public String decrypt(String encryptedData) throws Exception {
-        return aesStaticUtility.decrypt(encryptedData);
-    }
 }
