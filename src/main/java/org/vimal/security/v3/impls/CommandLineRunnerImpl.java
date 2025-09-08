@@ -39,7 +39,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void run(String... args) throws Exception {
+    public void run(String... args) {
         log.info("Initializing system permissions, roles, and default users.");
         initializeSystemPermissionsIfAbsent();
         initializeSystemRolesIfAbsent();
@@ -47,7 +47,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
         log.info("System permissions, roles, and default users initialized successfully.");
     }
 
-    private void initializeSystemPermissionsIfAbsent() throws Exception {
+    private void initializeSystemPermissionsIfAbsent() {
         Set<String> permissionNames = new HashSet<>();
         for (SystemPermissions permission : SystemPermissions.values()) {
             permissionNames.add(permission.name());
@@ -70,7 +70,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
         }
     }
 
-    private void initializeSystemRolesIfAbsent() throws Exception {
+    private void initializeSystemRolesIfAbsent() {
         Set<String> roleNames = new HashSet<>();
         Map<String, Set<String>> rolePermissionsMap = new HashMap<>();
         for (SystemRoles role : SystemRoles.values()) {
@@ -141,7 +141,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
         );
     }
 
-    private void initializeDefaultUsersIfAbsent() throws Exception {
+    private void initializeDefaultUsersIfAbsent() {
         Set<SystemUserDto> systemUsers = Set.of(
                 new SystemUserDto(
                         propertiesConfig.getGodUserUsername(),
