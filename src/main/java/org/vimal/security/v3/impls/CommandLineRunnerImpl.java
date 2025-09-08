@@ -9,8 +9,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.vimal.security.v3.configs.PropertiesConfig;
 import org.vimal.security.v3.dtos.SystemUserDto;
-import org.vimal.security.v3.encryptordecryptors.GenericAesRandomEncryptorDecryptor;
-import org.vimal.security.v3.encryptordecryptors.GenericAesStaticEncryptorDecryptor;
 import org.vimal.security.v3.enums.SystemPermissions;
 import org.vimal.security.v3.enums.SystemRoles;
 import org.vimal.security.v3.models.PermissionModel;
@@ -38,8 +36,6 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
     private final RoleRepo roleRepo;
     private final PermissionRepo permissionRepo;
     private final PasswordEncoder passwordEncoder;
-    private final GenericAesStaticEncryptorDecryptor genericAesStaticEncryptorDecryptor;
-    private final GenericAesRandomEncryptorDecryptor genericAesRandomEncryptorDecryptor;
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -65,7 +61,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
             if (!existingPermissions.contains(name)) {
                 newPermissions.add(PermissionModel.builder()
                         .permissionName(name)
-                        .createdBy(genericAesRandomEncryptorDecryptor.encrypt("SYSTEM"))
+                        .createdBy("SYSTEM")
                         .build());
             }
         }
@@ -111,7 +107,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
                         .roleName(entry.getKey())
                         .systemRole(true)
                         .permissions(permissions)
-                        .createdBy(genericAesRandomEncryptorDecryptor.encrypt("SYSTEM"))
+                        .createdBy("SYSTEM")
                         .build());
             }
         }
@@ -162,23 +158,16 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
                         Set.of(ROLE_GLOBAL_ADMIN.name())
                 )
         );
-        Set<String> encryptedUsernames = new HashSet<>();
-        Map<String, String> encryptedUsernameToUsernameMap = new HashMap<>();
-        Map<String, String> usernameToEncryptedUsernameMap = new HashMap<>();
+        Set<String> usernames = new HashSet<>();
         Set<String> roles = new HashSet<>();
-        String tempStr;
         for (SystemUserDto user : systemUsers) {
-            tempStr = genericAesStaticEncryptorDecryptor.encrypt(user.getUsername());
-            encryptedUsernames.add(tempStr);
-            encryptedUsernameToUsernameMap.put(tempStr, user.getUsername());
-            usernameToEncryptedUsernameMap.put(user.getUsername(), tempStr);
+            usernames.add(user.getUsername());
             if (!user.getRoles().isEmpty()) {
                 roles.addAll(user.getRoles());
             }
         }
-        Set<String> existingUsersUsernames = new HashSet<>();
-        for (UserModel user : userRepo.findByUsernameIn(encryptedUsernames)) {
-            existingUsersUsernames.add(encryptedUsernameToUsernameMap.get(user.getUsername()));
+        for (UserModel user : userRepo.findByUsernameIn(usernames)) {
+            usernames.remove(user.getUsername());
         }
         Map<String, RoleModel> roleMap = new HashMap<>();
         for (RoleModel roleModel : roleRepo.findAllById(roles)) {
@@ -186,7 +175,7 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
         }
         Set<UserModel> newUsers = new HashSet<>();
         for (SystemUserDto user : systemUsers) {
-            if (!existingUsersUsernames.contains(user.getUsername())) {
+            if (usernames.contains(user.getUsername())) {
                 Set<RoleModel> userRoles = new HashSet<>();
                 for (String roleName : user.getRoles()) {
                     RoleModel roleModel = roleMap.get(roleName);
@@ -195,14 +184,14 @@ public class CommandLineRunnerImpl implements CommandLineRunner {
                     }
                 }
                 newUsers.add(UserModel.builder()
-                        .username(usernameToEncryptedUsernameMap.get(user.getUsername()))
-                        .email(genericAesStaticEncryptorDecryptor.encrypt(user.getEmail()))
-                        .realEmail(genericAesStaticEncryptorDecryptor.encrypt(normalizeEmail(user.getEmail())))
+                        .username(user.getUsername())
+                        .email(user.getEmail())
+                        .realEmail(normalizeEmail(user.getEmail()))
                         .firstName(user.getFirstName())
                         .password(passwordEncoder.encode(user.getPassword()))
                         .roles(userRoles)
                         .emailVerified(true)
-                        .createdBy(genericAesRandomEncryptorDecryptor.encrypt("SYSTEM"))
+                        .createdBy("SYSTEM")
                         .build());
             }
         }
