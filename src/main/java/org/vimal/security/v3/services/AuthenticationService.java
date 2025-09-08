@@ -443,7 +443,7 @@ public class AuthenticationService {
 
     private void emailConfirmationOnMfaToggle(UserModel user,
                                               MfaType type,
-                                              boolean toggle) throws Exception {
+                                              boolean toggle) {
         if (unleash.isEnabled(EMAIL_CONFIRMATION_ON_SELF_MFA_ENABLE_DISABLE.name())) {
             String action = toggle ? "enabled" : "disabled";
             mailService.sendEmailAsync(
