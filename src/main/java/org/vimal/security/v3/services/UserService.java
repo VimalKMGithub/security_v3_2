@@ -1131,6 +1131,10 @@ public class UserService {
                 invalidInputs.add(ex.getMessage());
             }
         }
-        return new SelfUpdationResultDto(isModified, shouldRemoveTokens, invalidInputs);
+        return new SelfUpdationResultDto(
+                isModified,
+                shouldRemoveTokens,
+                invalidInputs
+        );
     }
 }
