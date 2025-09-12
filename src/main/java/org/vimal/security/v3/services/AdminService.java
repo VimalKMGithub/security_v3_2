@@ -848,7 +848,8 @@ public class AdminService {
             Map<String, Object> mapOfErrors = errorsStuffingIfAny(validateInputsForUsersUpdationResult);
             moreErrorsStuffingIfAny(
                     validateInputsForUsersUpdationResult,
-                    mapOfErrors
+                    mapOfErrors,
+                    updater
             );
             if (!isLenient) {
                 if (!mapOfErrors.isEmpty()) {
@@ -1091,7 +1092,8 @@ public class AdminService {
     }
 
     private void moreErrorsStuffingIfAny(ValidateInputsForUsersUpdationResultDto validateInputsForUsersUpdationResult,
-                                         Map<String, Object> mapOfErrors) {
+                                         Map<String, Object> mapOfErrors,
+                                         UserDetailsImpl updater) {
         if (!validateInputsForUsersUpdationResult.getDuplicateOldUsernames()
                 .isEmpty()) {
             mapOfErrors.put("duplicate_old_usernames_in_request", validateInputsForUsersUpdationResult.getDuplicateOldUsernames());
@@ -1099,6 +1101,10 @@ public class AdminService {
         if (!validateInputsForUsersUpdationResult.getInvalidOldUsernames()
                 .isEmpty()) {
             mapOfErrors.put("invalid_old_usernames", validateInputsForUsersUpdationResult.getInvalidOldUsernames());
+        }
+        if (validateInputsForUsersUpdationResult.getOldUsernames()
+                .contains(updater.getUsername())) {
+            mapOfErrors.put("you_cannot_update_your_own_account_using_this_endpoint", updater.getUsername());
         }
     }
 
@@ -1152,6 +1158,9 @@ public class AdminService {
         boolean shouldRemoveTokens;
         boolean tempBoolean;
         for (UserUpdationDto dto : dtos) {
+            if (dto.getOldUsername().equals(updater.getUsername())) {
+                continue;
+            }
             UserModel userToUpdate = oldUsernameToUserMap.get(dto.getOldUsername());
             if (userToUpdate == null) {
                 notFoundUsersWithOldUsernames.add(dto.getOldUsername());
